@@ -2,7 +2,7 @@ from itertools import chain
 from pprint import pprint
 
 import click
-from cache_to_disk import cache_to_disk, delete_disk_caches_for_function
+from cache_to_disk import cache_to_disk
 from ghapi.all import GhApi, paged
 
 
@@ -78,53 +78,25 @@ def main(org, dry_run, refresh_cache):
 
     deletion_count = 0
     api = GhApi()
-    (
-        fully_empty_teams,
-        members_but_nothing_else,
-        team_to_members,
-    ) = load_teams_data_from_github(org)
+    teams = []
+    teams = chain.from_iterable(paged(api.teams.list, org, per_page=100))
+    for team in teams:
+        repos = api.teams.list_repos_in_org(org, team.slug)
+        has_repos = bool(repos)
+        # assumes pagination will not pose an issue; true for edx-ops but not for larger teams
+        count_of_repos = len(repos)
+        # uninteresting for edx-ops
+        #has_projects = bool(api.teams.list_projects_in_org(org, team.slug))
+        # don't need to keep pulling this; only one child team relationship I've already noted
+        #has_child_teams = bool(api.teams.list_child_in_org(org, team.slug))
+        # assumes pagination will not pose an issue; true for edx-ops but not for larger teams
+        members = api.teams.list_members_in_org(org, team.slug)
+        count_of_members = len(members)
 
-    click.secho(
-        "The following teams have no related repos, projects, members, or child teams:",
-        bold=True,
-    )
-    for team in fully_empty_teams:
-        click.secho(f"    - {team}", fg="red")
+        print(f'{team.slug}\t{team.privacy}\t{count_of_repos}\t{count_of_members}')
 
-    if fully_empty_teams and (
-        click.confirm(
-            f"Delete {len(fully_empty_teams)} fully empty team(s)?({dry_run=})"
-        )
-    ):
-        click.secho("Deleting fully empty teams.", bold=True, fg="red")
-        for team in fully_empty_teams:
-            click.secho(f"Deleting '{team}'...", nl=False, fg="red")
-            if not dry_run:
-                api.teams.delete_in_org(org, team)
-            click.secho(f"Done", fg="red")
-            deletion_count += 1
-
-    click.secho(
-        "The following teams have members but no other related resources:", bold=True
-    )
-    for team in members_but_nothing_else:
-        click.secho(f"    - {team}")
-
-    if click.confirm(f"Review {len(members_but_nothing_else)} team(s) for deletion?"):
-        for team in members_but_nothing_else:
-            click.secho(f"'{team}' has the following members:", bold=True)
-            for member in team_to_members[team]:
-                click.secho(f"    - {member}")
-
-            if click.confirm(f"Delete '{team}'?({dry_run=})"):
-                click.secho(f"Deleting '{team}'...", nl=False, fg="red")
-                if not dry_run:
-                    api.teams.delete_in_org(org, team)
-                click.secho(f"Done", fg="red")
-                deletion_count += 1
-
-    click.echo("\n\n")
-    click.echo(click.style(f"{deletion_count}", bold=True) + " teams deleted.")
+        if members:
+            print(members[0])
 
 
 if __name__ == "__main__":
